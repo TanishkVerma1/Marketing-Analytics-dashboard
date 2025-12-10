@@ -410,7 +410,6 @@ def page_customer_insights(data):
             x="income",
             y="lifetime_value",
             color="customer_segment",
-            trendline="ols",
             hover_data=["region", "city_tier"],
             labels={"income": "Annual Income", "lifetime_value": "Lifetime Value"},
             title="Income vs Lifetime Value by Segment",
@@ -585,26 +584,32 @@ def page_attribution_funnel(data):
 
     # Build Sankey nodes and links from 4 touchpoints
     stages = ["touchpoint_1", "touchpoint_2", "touchpoint_3", "touchpoint_4"]
-    all_labels = sorted(
-        set(journey["touchpoint_1"])
-        | set(journey["touchpoint_2"])
-        | set(journey["touchpoint_3"])
-        | set(journey["touchpoint_4"])
-    )
+    
+    # Collect all unique labels, ignoring missing values and converting to string
+    label_set = set()
+    for col in stages:
+        label_set |= set(journey[col].dropna().astype(str))
+    
+    all_labels = sorted(label_set)
     label_to_idx = {lab: i for i, lab in enumerate(all_labels)}
-
-    sources = []
-    targets = []
-    values = []
-
+    
+    sources, targets, values = [], [], []
+    
     for i in range(len(stages) - 1):
         s_col = stages[i]
         t_col = stages[i + 1]
-        pair_agg = journey.groupby([s_col, t_col], as_index=False)["customer_count"].sum()
+    
+        # Use only rows where both touchpoints exist
+        subset = journey.dropna(subset=[s_col, t_col]).copy()
+        subset[s_col] = subset[s_col].astype(str)
+        subset[t_col] = subset[t_col].astype(str)
+    
+        pair_agg = subset.groupby([s_col, t_col], as_index=False)["customer_count"].sum()
         for _, row in pair_agg.iterrows():
             sources.append(label_to_idx[row[s_col]])
             targets.append(label_to_idx[row[t_col]])
             values.append(row["customer_count"])
+
 
     fig = go.Figure(
         data=[
