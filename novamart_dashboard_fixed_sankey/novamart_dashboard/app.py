@@ -208,62 +208,77 @@ def page_executive_overview(data):
     # ----- Revenue trend & channel performance -----
     left, right = st.columns([2, 1])
 
+    # ===== LEFT: Revenue Trend Over Time with aggregation toggle =====
     with left:
         st.subheader("Revenue Trend Over Time")
-        trend = (
-            cam_filt.groupby("date", as_index=False)["revenue"]
-            .sum()
-            .sort_values("date")
-        )
-        if not trend.empty:
-            trend["ma7"] = trend["revenue"].rolling(window=7, min_periods=1).mean()
-            fig = go.Figure()
-            fig.add_trace(
-                go.Scatter(
-                    x=trend["date"],
-                    y=trend["revenue"],
-                    mode="lines",
-                    name="Daily Revenue",
-                )
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=trend["date"],
-                    y=trend["ma7"],
-                    mode="lines",
-                    name="7-period MA",
-                    line=dict(dash="dash"),
-                )
-            )
-            fig.update_layout(
-                xaxis_title="Date",
-                yaxis_title="Revenue (₹)",
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No data available for the selected year.")
 
+        agg_choice = st.radio(
+            "Aggregation",
+            ["Daily", "Weekly", "Monthly"],
+            horizontal=True,
+            key="eo_revenue_agg",
+        )
+
+        tmp = cam_filt.copy()
+        if tmp.empty:
+            st.info("No data available for the selected year.")
+        else:
+            if agg_choice == "Daily":
+                tmp["period"] = tmp["date"]
+                subtitle = "Daily Revenue Trend"
+            elif agg_choice == "Weekly":
+                tmp["period"] = tmp["date"].dt.to_period("W").apply(lambda r: r.start_time)
+                subtitle = "Weekly Revenue Trend"
+            else:
+                tmp["period"] = tmp["date"].dt.to_period("M").dt.to_timestamp()
+                subtitle = "Monthly Revenue Trend"
+
+            trend = (
+                tmp.groupby("period", as_index=False)["revenue"]
+                .sum()
+                .sort_values("period")
+            )
+
+            if trend.empty:
+                st.info("No data available for the selected year.")
+            else:
+                trend["ma7"] = trend["revenue"].rolling(window=7, min_periods=1).mean()
+
+                st.caption(subtitle)
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Scatter(
+                        x=trend["period"],
+                        y=trend["revenue"],
+                        mode="lines",
+                        name="Revenue",
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=trend["period"],
+                        y=trend["ma7"],
+                        mode="lines",
+                        name="7-period MA",
+                        line=dict(dash="dash"),
+                    )
+                )
+                fig.update_layout(
+                    xaxis_title="Date",
+                    yaxis_title="Revenue (₹)",
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+    # ===== RIGHT: Channel Performance with metric dropdown =====
     with right:
         st.subheader("Channel Performance")
-        channel_rev = (
-            cam_filt.groupby("channel", as_index=False)["revenue"]
-            .sum()
-            .sort_values("revenue", ascending=True)
-        )
-        if not channel_rev.empty:
-            fig = px.bar(
-                channel_rev,
-                x="revenue",
-                y="channel",
-                orientation="h",
-                color="revenue",
-                color_continuous_scale="Blues",
-                labels={"revenue": "Revenue (₹)", "channel": "Channel"},
-                title="Revenue by Channel",
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No channel data for the selected year.")
+
+        metric_label = st.selectbox(
+            "Select Metric",
+            ["Revenue", "Conversions", "ROAS"],
+            index=0,
+            key="eo_c_
+
 
     st.markdown("---")
 
