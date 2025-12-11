@@ -277,64 +277,54 @@ def page_executive_overview(data):
             "Select Metric",
             ["Revenue", "Conversions", "ROAS"],
             index=0,
-            key="eo_c_
-
-
-    st.markdown("---")
-
-    # ----- Regional revenue & campaign type performance -----
-    col_a, col_b = st.columns(2)
-
-    with col_a:
-        st.subheader("Regional Revenue Distribution")
-        reg = (
-            cam_filt.groupby("region", as_index=False)["revenue"]
-            .sum()
-            .sort_values("revenue", ascending=False)
+            key="eo_channel_metric",
         )
-        if not reg.empty:
-            fig = px.pie(
-                reg,
-                values="revenue",
-                names="region",
-                title="Revenue Share by Region",
-                hole=0.0,
-            )
-            st.plotly_chart(fig, use_container_width=True)
+
+        # Map selection to actual field names
+        if metric_label == "Revenue":
+            metric_col = "revenue"
+            agg_type = "sum"
+        elif metric_label == "Conversions":
+            metric_col = "conversions"
+            agg_type = "sum"
+        else:  # ROAS
+            metric_col = "roas"
+            agg_type = "mean"
+
+        if cam_filt.empty:
+            st.info("No channel data for the selected year.")
         else:
-            st.info("No regional data for the selected year.")
+            # Aggregate values
+            if agg_type == "sum":
+                channel_perf = (
+                    cam_filt.groupby("channel", as_index=False)[metric_col]
+                    .sum()
+                    .sort_values(metric_col, ascending=True)
+                )
+            else:
+                channel_perf = (
+                    cam_filt.groupby("channel", as_index=False)[metric_col]
+                    .mean()
+                    .sort_values(metric_col, ascending=True)
+                )
 
-    with col_b:
-        st.subheader("Campaign Type Performance")
-        ct = (
-            cam_filt.groupby("campaign_type", as_index=False)[["revenue", "spend"]]
-            .sum()
-            .sort_values("revenue", ascending=False)
-        )
-        if not ct.empty:
-            melted = ct.melt(
-                id_vars="campaign_type",
-                value_vars=["revenue", "spend"],
-                var_name="metric",
-                value_name="amount",
-            )
             fig = px.bar(
-                melted,
-                x="campaign_type",
-                y="amount",
-                color="metric",
-                barmode="group",
-                labels={
-                    "campaign_type": "Campaign Type",
-                    "amount": "Amount (₹)",
-                    "metric": "Metric",
-                },
-                title="Revenue vs Spend by Campaign Type",
+                channel_perf,
+                x=metric_col,
+                y="channel",
+                orientation="h",
+                color=metric_col,
+                color_continuous_scale="Blues",
+                labels={metric_col: metric_label, "channel": "Channel"},
+                title=f"{metric_label} by Channel",
             )
-            fig.update_layout(xaxis_tickangle=-30)
+
+            # IMPORTANT: Remove ₹ symbol from x-axis for ALL metrics
+            fig.update_layout(
+                xaxis_title=metric_label,
+            )
+
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No campaign type data for the selected year.")
 
     st.markdown("---")
 
