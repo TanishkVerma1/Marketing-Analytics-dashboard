@@ -811,16 +811,18 @@ fig.update_layout(title_text="Customer Journey Across Touchpoints", font_size=10
 st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("---")
+st.subheader("Metric Correlation Heatmap")
 
-    st.subheader("Metric Correlation Heatmap")
-    fig = px.imshow(
-        correlation,
-        text_auto=".2f",
-        aspect="auto",
-        color_continuous_scale="RdBu_r",
-        title="Correlation Between Marketing Metrics",
-    )
-    st.plotly_chart(fig, use_container_width=True)
+corr_df = data["correlation"]
+fig = px.imshow(
+    corr_df,
+    text_auto=True,
+    aspect="auto",
+    color_continuous_scale="RdBu_r",
+    title="Correlation Among Metrics",
+)
+st.plotly_chart(fig, use_container_width=True)
+
 
 
 # =============================================================================
