@@ -599,7 +599,36 @@ def page_customer_insights(data):
     st.markdown("Understand who NovaMart customers are and how they behave.")
 
     customers = data["customers"]
+    
+        # ----- Customer Overview KPIs -----
+    total_customers = len(customers)
+    avg_ltv = customers["lifetime_value"].mean()
+    avg_satisfaction = customers["satisfaction_score"].mean()
+    churn_rate = customers["is_churned"].mean() * 100
+    avg_purchases = customers["total_purchases"].mean()
 
+    st.markdown("### Customer Overview")
+
+    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+
+    with kpi1:
+        st.metric("Total Customers", format_big_number(total_customers))
+
+    with kpi2:
+        st.metric("Avg. Lifetime Value", format_money_indian(avg_ltv))
+
+    with kpi3:
+        st.metric("Avg. Satisfaction", f"{avg_satisfaction:.2f}/5")
+
+    with kpi4:
+        st.metric("Churn Rate", f"{churn_rate:.1f}%")
+
+    with kpi5:
+        st.metric("Avg. Purchases", f"{avg_purchases:.0f}")
+
+    st.markdown("---")
+
+    
     tab1, tab2 = st.tabs(["Distributions", "Relationships & Segments"])
 
     with tab1:
