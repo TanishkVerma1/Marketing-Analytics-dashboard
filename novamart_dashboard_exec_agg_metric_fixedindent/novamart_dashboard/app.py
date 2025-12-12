@@ -1028,6 +1028,25 @@ def page_geographic_analysis(data):
         if geo.empty:
             st.info("No geographic data available.")
         else:
+            fig = px.scatter_geo(
+                geo,
+                lat="latitude",
+                lon="longitude",
+                size="total_revenue",          # bubble size – total revenue
+                color=metric_col,              # color – selected metric
+                hover_name="state",
+                hover_data={
+                    "region": True,
+                    "total_revenue": True,
+                    "total_customers": True,
+                    "store_count": True,
+                    metric_col: True,
+                },
+                projection="natural earth",
+                color_continuous_scale="Blues",
+            )
+
+            # 👇 all of this stays inside the ELSE block
             fig.update_geos(
                 fitbounds="locations",
                 visible=True,
@@ -1035,15 +1054,17 @@ def page_geographic_analysis(data):
                 countrycolor="LightGray",
                 showland=True,
                 landcolor="#F5F5F5",
-                lataxis_range=[5, 37],   # roughly India bounds
+                lataxis_range=[5, 37],
                 lonaxis_range=[68, 98],
             )
-            fig.update_geos(fitbounds="locations", visible=False)
+
             fig.update_layout(
                 margin=dict(l=0, r=0, t=0, b=0),
                 coloraxis_colorbar_title=metric_col,
             )
+
             st.plotly_chart(fig, use_container_width=True)
+
 
     st.markdown("---")
 
@@ -1071,12 +1092,28 @@ def page_geographic_analysis(data):
             projection="natural earth",
             color_continuous_scale="RdYlGn",
         )
-        fig.update_geos(fitbounds="locations", visible=False)
+
+        fig.update_geos(
+            fitbounds="locations",
+            visible=True,
+            showcountries=True,
+            countrycolor="LightGray",
+            showland=True,
+            landcolor="#F5F5F5",
+            lataxis_range=[5, 37],
+            lonaxis_range=[68, 98],
+        )
+
         fig.update_layout(
             margin=dict(l=0, r=0, t=0, b=0),
             coloraxis_colorbar_title="customer_satisfaction",
         )
+
         st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("Map Legend", expanded=True):
+            st.markdown("**Size:** Store Count  \n**Color:** Customer Satisfaction")
+
 
         # Small legend text like your sir's map
         with st.expander("Map Legend", expanded=True):
