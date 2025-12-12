@@ -964,50 +964,272 @@ def page_product_performance(data):
 # =============================================================================
 def page_geographic_analysis(data):
     st.title("🗺️ Geographic Analysis")
-    st.markdown("State-level and regional performance across India.")
+    st.markdown(
+        "State-wise performance metrics and store distribution across India."
+    )
 
     geo = data["geographic"]
 
-    st.subheader("State Revenue & Customers (Bubble Map)")
-    metric = st.selectbox(
-        "Bubble Size Metric",
-        ["total_revenue", "total_customers", "store_count"],
-        index=0,
-    )
-    color_metric = st.selectbox(
-        "Color Metric",
-        ["revenue_per_customer", "market_penetration", "yoy_growth", "customer_satisfaction"],
-        index=1,
-    )
+    # ==========================
+    # Geographic Overview KPIs
+    # ==========================
+    st.markdown("### Geographic Overview")
 
-    fig = px.scatter_geo(
-        geo,
-        lat="latitude",
-        lon="longitude",
-        size=metric,
-        color=color_metric,
-        hover_name="state",
-        hover_data={"region": True, metric: True, color_metric: True},
-        projection="natural earth",
-        title="Store & Revenue Footprint Across India",
-    )
-    fig.update_geos(fitbounds="locations", visible=False)
-    st.plotly_chart(fig, use_container_width=True)
+    states_covered = geo["state"].nunique()
+    total_customers = geo["total_customers"].sum()
+    total_revenue = geo["total_revenue"].sum()
+    total_stores = geo["store_count"].sum()
+    avg_satisfaction = geo["customer_satisfaction"].mean()
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+
+    with c1:
+        st.metric("States Covered", f"{states_covered}")
+    with c2:
+        st.metric("Total Customers", format_big_number(total_customers))
+    with c3:
+        st.metric("Total Revenue", format_money_indian(total_revenue))
+    with c4:
+        st.metric("Total Stores", f"{int(total_stores)}")
+    with c5:
+        st.metric(
+            "Avg Satisfaction",
+            f"{avg_satisfaction:.2f}/5" if not pd.isna(avg_satisfaction) else "-",
+        )
 
     st.markdown("---")
-    st.subheader("Region vs Market Penetration")
 
-    reg = geo.groupby("region", as_index=False)[["market_penetration", "customer_satisfaction"]].mean()
-    fig = px.bar(
-        reg,
-        x="region",
-        y=["market_penetration", "customer_satisfaction"],
-        barmode="group",
-        title="Market Penetration & Satisfaction by Region",
-        labels={"value": "Score", "variable": "Metric", "region": "Region"},
+    # ==========================
+    # Section 6: State-wise Performance
+    # ==========================
+    st.markdown("### Section 6: State-wise Performance")
+
+    left, right = st.columns([4, 1])
+
+    metric_map = {
+        "Total Revenue": "total_revenue",
+        "Total Customers": "total_customers",
+        "Market Penetration": "market_penetration",
+        "YoY Growth": "yoy_growth",
+        "Customer Satisfaction": "customer_satisfaction",
+    }
+
+    with right:
+        metric_label = st.selectbox(
+            "Select Metric",
+            list(metric_map.keys()),
+            index=0,
+            key="geo_state_metric",
+        )
+        metric_col = metric_map[metric_label]
+
+    with left:
+        st.subheader("State-wise Total Revenue")
+        if geo.empty:
+            st.info("No geographic data available.")
+        else:
+            fig = px.scatter_geo(
+                geo,
+                lat="latitude",
+                lon="longitude",
+                size="total_revenue",          # bubble size – total revenue
+                color=metric_col,              # color – selected metric
+                hover_name="state",
+                hover_data={
+                    "region": True,
+                    "total_revenue": True,
+                    "total_customers": True,
+                    "store_count": True,
+                    metric_col: True,
+                },
+                projection="natural earth",
+                color_continuous_scale="Blues",
+            )
+            fig.update_geos(fitbounds="locations", visible=False)
+            fig.update_layout(
+                margin=dict(l=0, r=0, t=0, b=0),
+                coloraxis_colorbar_title=metric_col,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+
+    # ==========================
+    # Store Performance Map
+    # ==========================
+    st.markdown("### Store Performance Map")
+    st.caption("Store Count (Size) vs Customer Satisfaction (Color)")
+
+    if geo.empty:
+        st.info("No geographic data available.")
+    else:
+        fig = px.scatter_geo(
+            geo,
+            lat="latitude",
+            lon="longitude",
+            size="store_count",               # size: number of stores
+            color="customer_satisfaction",    # color: satisfaction
+            hover_name="state",
+            hover_data={
+                "region": True,
+                "store_count": True,
+                "customer_satisfaction": True,
+            },
+            projection="natural earth",
+            color_continuous_scale="RdYlGn",
+        )
+        fig.update_geos(fitbounds="locations", visible=False)
+        fig.update_layout(
+            margin=dict(l=0, r=0, t=0, b=0),
+            coloraxis_colorbar_title="customer_satisfaction",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Small legend text like your sir's map
+        with st.expander("Map Legend", expanded=True):
+            st.markdown("**Size:** Store Count  \\n**Color:** Customer Satisfaction")
+
+    st.markdown("---")
+
+    # ==========================
+    # Regional Comparison
+    # ==========================
+    st.markdown("### Regional Comparison")
+
+    col_rev, col_bubble = st.columns(2)
+
+    # --- Revenue by State (bar chart)
+    with col_rev:
+        st.subheader("Revenue by State")
+        if geo.empty:
+            st.info("No geographic data available.")
+        else:
+            rev_sorted = geo.sort_values("total_revenue", ascending=False)
+            fig = px.bar(
+                rev_sorted,
+                x="total_revenue",
+                y="state",
+                orientation="h",
+                color="total_revenue",
+                color_continuous_scale="Blues",
+                labels={"total_revenue": "Revenue", "state": "State"},
+            )
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+    # --- YoY Growth vs Market Penetration (bubble chart)
+    with col_bubble:
+        st.subheader("YoY Growth vs Market Penetration")
+        if geo.empty:
+            st.info("No geographic data available.")
+        else:
+            avg_growth = geo["yoy_growth"].mean()
+            avg_pen = geo["market_penetration"].mean()
+
+            fig = px.scatter(
+                geo,
+                x="market_penetration",
+                y="yoy_growth",
+                size="total_revenue",
+                color="region",
+                hover_name="state",
+                labels={
+                    "market_penetration": "Market Penetration (%)",
+                    "yoy_growth": "YoY Growth (%)",
+                    "region": "Region",
+                },
+            )
+            # reference lines (overall averages)
+            fig.add_hline(y=avg_growth, line_dash="dash", line_color="gray")
+            fig.add_vline(x=avg_pen, line_dash="dash", line_color="gray")
+            st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+
+    # ==========================
+    # State Performance Details (table)
+    # ==========================
+    st.markdown("### State Performance Details")
+
+    regions = ["All"] + sorted(geo["region"].unique().tolist())
+    region_choice = st.selectbox(
+        "Filter by Region",
+        regions,
+        index=0,
+        key="geo_region_filter",
     )
-    st.plotly_chart(fig, use_container_width=True)
 
+    table_data = geo.copy()
+    if region_choice != "All":
+        table_data = table_data[table_data["region"] == region_choice]
+
+    if table_data.empty:
+        st.info("No data for the selected region.")
+    else:
+        display_df = pd.DataFrame(
+            {
+                "State": table_data["state"],
+                "Region": table_data["region"],
+                "Customers": table_data["total_customers"].apply(
+                    lambda x: f"{x:,.0f}"
+                ),
+                "Revenue": table_data["total_revenue"].apply(format_money_indian),
+                "Rev/Customer": table_data["revenue_per_customer"].apply(
+                    lambda x: format_money_indian(x) if not pd.isna(x) else "-"
+                ),
+                "Stores": table_data["store_count"].astype(int),
+                "Penetration": table_data["market_penetration"].map(
+                    lambda x: f"{x:.1f}%"
+                ),
+                "YoY Growth": table_data["yoy_growth"].map(
+                    lambda x: f"{x:+.1f}%"
+                ),
+                "Satisfaction": table_data["customer_satisfaction"].map(
+                    lambda x: f"{x:.2f}"
+                ),
+                "Avg Delivery": table_data["avg_delivery_days"].map(
+                    lambda x: f"{x:.1f} days"
+                ),
+            }
+        )
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # ==========================
+    # Key Insights
+    # ==========================
+    st.markdown("### Key Insights")
+
+    if geo.empty:
+        st.info("No data available for insights.")
+    else:
+        # Top revenue state
+        top_state = geo.sort_values("total_revenue", ascending=False).iloc[0]
+
+        # Fastest growing (max YoY)
+        fastest = geo.sort_values("yoy_growth", ascending=False).iloc[0]
+
+        # Highest satisfaction
+        happiest = geo.sort_values("customer_satisfaction", ascending=False).iloc[0]
+
+        k1, k2, k3 = st.columns(3)
+
+        with k1:
+            st.markdown(
+                f"**Top State:** {top_state['state']} with "
+                f"{format_money_indian(top_state['total_revenue'])} revenue"
+            )
+        with k2:
+            st.markdown(
+                f"**Fastest Growing:** {fastest['state']} "
+                f"at {fastest['yoy_growth']:.1f}% YoY"
+            )
+        with k3:
+            st.markdown(
+                f"**Highest Satisfaction:** {happiest['state']} "
+                f"at {happiest['customer_satisfaction']:.2f}/5"
+            )
 
 # =============================================================================
 # PAGE: ATTRIBUTION & FUNNEL
