@@ -713,53 +713,245 @@ def page_customer_insights(data):
 # =============================================================================
 def page_product_performance(data):
     st.title("📦 Product Performance")
-    st.markdown("Analyse NovaMart product categories and profitability.")
+    st.markdown("Analyze product sales hierarchy, category performance, and regional distribution.")
 
     products = data["products"]
 
-    col1, col2 = st.columns([2, 1])
+    # ----- Sidebar filters -----
+    st.sidebar.markdown("### Product Filters")
 
-    with col1:
-        st.subheader("Category → Subcategory → Product Treemap")
-        fig = px.treemap(
-            products,
-            path=["category", "subcategory", "product_name"],
-            values="sales",
-            color="profit_margin",
-            color_continuous_scale="RdYlGn",
-            title="Sales & Profit Margin Treemap",
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    year_options = sorted(products["year"].unique().tolist())
+    year_choice = st.sidebar.selectbox(
+        "Year",
+        ["All"] + [str(y) for y in year_options],
+        index=0,
+        key="pp_year",
+    )
 
-    with col2:
-        st.subheader("Top Categories by Sales")
-        cat = products.groupby("category", as_index=False)["sales"].sum()
-        fig = px.bar(
-            cat.sort_values("sales", ascending=True),
-            x="sales",
-            y="category",
-            orientation="h",
-            title="Total Sales by Category",
-            labels={"sales": "Sales", "category": "Category"},
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    cat_options = sorted(products["category"].unique().tolist())
+    cat_selected = st.sidebar.multiselect(
+        "Categories",
+        cat_options,
+        default=cat_options,
+        key="pp_categories",
+    )
+
+    region_options = sorted(products["region"].unique().tolist())
+    region_selected = st.sidebar.multiselect(
+        "Regions",
+        region_options,
+        default=region_options,
+        key="pp_regions",
+    )
+
+    prod_filt = products.copy()
+    if year_choice != "All":
+        prod_filt = prod_filt[prod_filt["year"] == int(year_choice)]
+    if cat_selected:
+        prod_filt = prod_filt[prod_filt["category"].isin(cat_selected)]
+    if region_selected:
+        prod_filt = prod_filt[prod_filt["region"].isin(region_selected)]
+
+    # ----- Product Overview KPIs -----
+    st.markdown("### Product Overview")
+
+    total_sales = prod_filt["sales"].sum()
+    total_units = prod_filt["units_sold"].sum()
+    total_profit = prod_filt["profit"].sum()
+    if total_sales > 0:
+        avg_margin = total_profit / total_sales * 100
+    else:
+        avg_margin = float("nan")
+    avg_rating = prod_filt["avg_rating"].mean()
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+
+    with k1:
+        st.metric("Total Sales", format_money_indian(total_sales))
+    with k2:
+        st.metric("Units Sold", format_big_number(total_units))
+    with k3:
+        st.metric("Total Profit", format_money_indian(total_profit))
+    with k4:
+        st.metric("Avg Profit Margin", f"{avg_margin:.1f}%")
+    with k5:
+        st.metric("Avg Rating", f"{avg_rating:.2f}/5" if not pd.isna(avg_rating) else "-")
 
     st.markdown("---")
-    st.subheader("Regional Category Performance")
-    region_sel = st.selectbox("Select Region", sorted(products["region"].unique().tolist()))
-    filt = products[products["region"] == region_sel]
-    reg_cat = filt.groupby("category", as_index=False)[["sales", "profit"]].sum()
 
-    fig = px.bar(
-        reg_cat,
-        x="category",
-        y=["sales", "profit"],
-        barmode="group",
-        title=f"Sales & Profit by Category - {region_sel}",
-        labels={"value": "Value", "category": "Category", "variable": "Metric"},
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    # ===== Product Sales Hierarchy (Treemap) =====
+    st.markdown("### Section 5: Product Sales Hierarchy (Treemap)")
 
+    left, right = st.columns([4, 1])
+
+    with right:
+        color_by = st.selectbox(
+            "Color by",
+            ["profit_margin", "sales", "profit", "avg_rating", "return_rate"],
+            index=0,
+            key="pp_color_by",
+        )
+
+    with left:
+        st.subheader("Product Hierarchy (Size: Sales, Color: Selected Metric)")
+        if prod_filt.empty:
+            st.info("No data for the selected filters.")
+        else:
+            fig = px.treemap(
+                prod_filt,
+                path=["category", "subcategory", "product_name"],
+                values="sales",
+                color=color_by,
+                color_continuous_scale="RdYlGn",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    # ===== Subcategory Performance =====
+    st.markdown("### Subcategory Performance")
+    st.subheader("Sales by Subcategory")
+
+    if prod_filt.empty:
+        st.info("No data for the selected filters.")
+    else:
+        sub = (
+            prod_filt.groupby("subcategory", as_index=False)
+            .agg({"sales": "sum", "profit_margin": "mean"})
+        )
+        sub = sub.sort_values("sales", ascending=False).head(10)
+
+        fig = px.bar(
+            sub,
+            x="sales",
+            y="subcategory",
+            orientation="h",
+            color="profit_margin",
+            color_continuous_scale="RdYlGn",
+            labels={"sales": "Sales", "subcategory": "Subcategory", "profit_margin": "profit_margin"},
+            title="Sales by Subcategory",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ===== Regional Product Performance & Quarterly Trends =====
+    st.markdown("### Regional Product Performance")
+
+    col_reg, col_trend = st.columns(2)
+
+    with col_reg:
+        st.subheader("Sales by Region")
+        if prod_filt.empty:
+            st.info("No data for the selected filters.")
+        else:
+            reg_cat = (
+                prod_filt.groupby(["region", "category"], as_index=False)["sales"].sum()
+            )
+            fig = px.bar(
+                reg_cat,
+                x="region",
+                y="sales",
+                color="category",
+                barmode="stack",
+                labels={"sales": "Sales", "region": "Region", "category": "Category"},
+                title="Category Sales by Region",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    with col_trend:
+        st.subheader("Quarterly Trends")
+        if prod_filt.empty:
+            st.info("No data for the selected filters.")
+        else:
+            q_cat = (
+                prod_filt.groupby(["quarter", "category"], as_index=False)["sales"].sum()
+            )
+            # order quarters chronologically, e.g. "Q1 2023"
+            all_quarters = sorted(
+                q_cat["quarter"].unique(),
+                key=lambda q: (int(q.split()[1]), int(q[1])),
+            )
+            fig = px.line(
+                q_cat,
+                x="quarter",
+                y="sales",
+                color="category",
+                markers=True,
+                category_orders={"quarter": all_quarters},
+                labels={"sales": "Sales", "quarter": "Quarter", "category": "Category"},
+                title="Quarterly Sales Trend by Category",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    # ===== Top Products & Key Insights =====
+    st.markdown("### Top Products by Sales")
+
+    if prod_filt.empty:
+        st.info("No data for the selected filters.")
+    else:
+        agg = (
+            prod_filt.groupby(["product_name", "category", "subcategory"], as_index=False)
+            .agg(
+                {
+                    "sales": "sum",
+                    "units_sold": "sum",
+                    "profit": "sum",
+                    "profit_margin": "mean",
+                    "avg_rating": "mean",
+                    "return_rate": "mean",
+                }
+            )
+        )
+        top_prod = agg.sort_values("sales", ascending=False).head(10)
+
+        display_df = pd.DataFrame(
+            {
+                "Product": top_prod["product_name"],
+                "Category": top_prod["category"],
+                "Subcategory": top_prod["subcategory"],
+                "Sales": top_prod["sales"].apply(format_money_indian),
+                "Units Sold": top_prod["units_sold"].astype(int),
+                "Profit": top_prod["profit"].apply(format_money_indian),
+                "Margin": top_prod["profit_margin"].map(
+                    lambda x: f"{x:.1f}%" if not pd.isna(x) else "-"
+                ),
+                "Rating": top_prod["avg_rating"].map(
+                    lambda x: f"{x:.1f}" if not pd.isna(x) else "-"
+                ),
+                "Return Rate": top_prod["return_rate"].map(
+                    lambda x: f"{x:.1f}%" if not pd.isna(x) else "-"
+                ),
+            }
+        )
+
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+        # Key insights
+        st.markdown("### Key Insights")
+        c1, c2, c3 = st.columns(3)
+
+        # Top Category by Sales
+        cat_sales = prod_filt.groupby("category", as_index=False)["sales"].sum()
+        top_cat = cat_sales.sort_values("sales", ascending=False).iloc[0]
+
+        # Best Margins (by category, weighted by sales)
+        cat_margin_df = prod_filt.groupby("category", as_index=False)[["profit", "sales"]].sum()
+        cat_margin_df["margin"] = cat_margin_df["profit"] / cat_margin_df["sales"] * 100
+        best_margin = cat_margin_df.sort_values("margin", ascending=False).iloc[0]
+
+        # Top Rated subcategory
+        sub_rating = prod_filt.groupby("subcategory", as_index=False)["avg_rating"].mean()
+        best_rating = sub_rating.sort_values("avg_rating", ascending=False).iloc[0]
+
+        with c1:
+            st.markdown(
+                f"**Top Category:** {top_cat['category']} with {format_money_indian(top_cat['sales'])} in sales"
+            )
+        with c2:
+            st.markdown(
+                f"**Best Margins:** {best_margin['category']} at {best_margin['margin']:.1f}% average margin"
+            )
+        with c3:
+            st.markdown(
+                f"**Top Rated:** {best_rating['subcategory']} at {best_rating['avg_rating']:.1f}/5 average rating"
+            )
 
 # =============================================================================
 # PAGE: GEOGRAPHIC ANALYSIS
