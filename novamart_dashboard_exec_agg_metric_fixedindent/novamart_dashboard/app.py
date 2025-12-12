@@ -863,11 +863,10 @@ def page_product_performance(data):
             q_cat = (
                 prod_filt.groupby(["quarter", "category"], as_index=False)["sales"].sum()
             )
-            # order quarters chronologically, e.g. "Q1 2023"
-            all_quarters = sorted(
-                q_cat["quarter"].unique(),
-                key=lambda q: (int(q.split()[1]), int(q[1])),
-            )
+
+            # Order quarters as strings (Q1 2023, Q1 2024, Q2 2023, Q2 2024, ...)
+            all_quarters = sorted(q_cat["quarter"].unique().tolist())
+
             fig = px.line(
                 q_cat,
                 x="quarter",
@@ -878,6 +877,13 @@ def page_product_performance(data):
                 labels={"sales": "Sales", "quarter": "Quarter", "category": "Category"},
                 title="Quarterly Sales Trend by Category",
             )
+
+            # Make quarter labels slanted like your professor's chart
+            fig.update_layout(
+                xaxis_title="Quarter",
+                xaxis_tickangle=-45,
+            )
+
             st.plotly_chart(fig, use_container_width=True)
 
     # ===== Top Products & Key Insights =====
