@@ -1268,11 +1268,62 @@ def page_attribution_funnel(data):
     st.title("🎯 Attribution & Funnel")
     st.markdown("How different channels contribute along the marketing funnel.")
 
-    attribution = data["attribution"]
-    funnel = data["funnel"]
-    correlation = data["correlation"]
-    journey = data["journey"]
+    attribution = data["attribution"].copy()
+    funnel = data["funnel"].copy()
+    correlation = data["correlation"].copy()
+    journey = data["journey"].copy()
 
+    # -------------------------------
+    # Funnel Metrics (table-style)
+    # -------------------------------
+    st.subheader("Funnel Metrics")
+
+    # Build drop % between stages
+    f = funnel[["stage", "visitors"]].copy()
+    f["drop_pct"] = 0.0
+    for i in range(1, len(f)):
+        prev = f.loc[i - 1, "visitors"]
+        cur = f.loc[i, "visitors"]
+        f.loc[i, "drop_pct"] = (1 - (cur / prev)) * 100 if prev else 0
+
+    # Display like your screenshot
+    display = f.copy()
+    display["drop_pct"] = display["drop_pct"].map(lambda x: "✓" if x == 0 else f"↓ {x:.1f}%")
+    st.dataframe(display, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # -------------------------------
+    # Attribution model descriptions (bullets)
+    # -------------------------------
+    st.markdown("### Model Descriptions:")
+    st.markdown(
+        """
+- **First Touch:** Credit to first interaction  
+- **Last Touch:** Credit to last interaction  
+- **Linear:** Equal credit across all touchpoints  
+- **Time Decay:** More credit to recent touches  
+- **Position Based:** 40% first, 40% last, 20% middle
+        """.strip()
+    )
+
+    st.markdown("---")
+
+    # -------------------------------
+    # Attribution Model Comparison Table
+    # -------------------------------
+    st.subheader("Attribution Model Comparison Table")
+
+    model_cols = [c for c in ["first_touch", "last_touch", "linear", "time_decay", "position_based"] if c in attribution.columns]
+    show = ["channel"] + model_cols
+    st.dataframe(attribution[show].sort_values(model_cols[0], ascending=False) if model_cols else attribution,
+                 use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # -------------------------------
+    # Channel Attribution (donut) + Funnel (plot)
+    # -------------------------------
     col1, col2 = st.columns(2)
 
     with col1:
@@ -1282,7 +1333,6 @@ def page_attribution_funnel(data):
             ["first_touch", "last_touch", "linear", "time_decay", "position_based"],
             index=1,
         )
-
         fig = px.pie(
             attribution,
             names="channel",
@@ -1305,55 +1355,90 @@ def page_attribution_funnel(data):
         st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")
-    
+
+    # -------------------------------
+    # Improved Customer Journey Sankey (cleaner + stage-separated labels)
+    # -------------------------------
     st.subheader("Customer Journey Sankey (Touchpoints)")
 
-    # Build Sankey nodes and links from 4 touchpoints, handling missing values safely
     stages = ["touchpoint_1", "touchpoint_2", "touchpoint_3", "touchpoint_4"]
+    stages = [c for c in stages if c in journey.columns]
 
-    # Collect all unique labels ignoring NaNs
-    label_set = set()
-    for col in stages:
-        label_set |= set(journey[col].dropna().astype(str))
+    if len(stages) < 2:
+        st.warning("Journey dataset does not have enough touchpoint columns to build Sankey.")
+    else:
+        # Stage-separated labels to avoid messy merges
+        def stage_label(stage_idx, val):
+            return f"T{stage_idx+1}: {val}"
 
-    all_labels = sorted(label_set)
-    label_to_idx = {lab: i for i, lab in enumerate(all_labels)}
+        # Build node list per stage
+        node_labels = []
+        node_index = {}
+        for si, col in enumerate(stages):
+            vals = journey[col].dropna().astype(str).unique().tolist()
+            vals = sorted(vals)
+            for v in vals:
+                lab = stage_label(si, v)
+                node_index[(si, v)] = len(node_labels)
+                node_labels.append(lab)
 
-    sources, targets, values = [], [], []
+        sources, targets, values = [], [], []
+        for si in range(len(stages) - 1):
+            s_col = stages[si]
+            t_col = stages[si + 1]
+            subset = journey.dropna(subset=[s_col, t_col]).copy()
+            subset[s_col] = subset[s_col].astype(str)
+            subset[t_col] = subset[t_col].astype(str)
 
-    for i in range(len(stages) - 1):
-        s_col = stages[i]
-        t_col = stages[i + 1]
+            grp = subset.groupby([s_col, t_col], as_index=False)["customer_count"].sum()
 
-        subset = journey.dropna(subset=[s_col, t_col]).copy()
-        subset[s_col] = subset[s_col].astype(str)
-        subset[t_col] = subset[t_col].astype(str)
+            # Reduce clutter: keep top links, bucket small flows
+            grp = grp.sort_values("customer_count", ascending=False)
+            top = grp.head(25)
+            rest = grp.iloc[25:]
+            if not rest.empty:
+                # bucket rest into "Other"
+                other_s = "Other"
+                other_t = "Other"
+                # create nodes if not exist
+                if (si, other_s) not in node_index:
+                    node_index[(si, other_s)] = len(node_labels)
+                    node_labels.append(stage_label(si, other_s))
+                if (si + 1, other_t) not in node_index:
+                    node_index[(si + 1, other_t)] = len(node_labels)
+                    node_labels.append(stage_label(si + 1, other_t))
 
-        pair_agg = subset.groupby([s_col, t_col], as_index=False)["customer_count"].sum()
-        for _, row in pair_agg.iterrows():
-            sources.append(label_to_idx[row[s_col]])
-            targets.append(label_to_idx[row[t_col]])
-            values.append(row["customer_count"])
+                sources.append(node_index[(si, other_s)])
+                targets.append(node_index[(si + 1, other_t)])
+                values.append(rest["customer_count"].sum())
 
-    fig = go.Figure(
-        data=[
-            go.Sankey(
-                node=dict(
-                    pad=15,
-                    thickness=15,
-                    line=dict(color="black", width=0.5),
-                    label=all_labels,
-                ),
-                link=dict(source=sources, target=targets, value=values),
-            )
-        ]
-    )
-    fig.update_layout(title_text="Customer Journey Across Touchpoints", font_size=10)
-    st.plotly_chart(fig, use_container_width=True)
+            for _, r in top.iterrows():
+                sources.append(node_index[(si, r[s_col])])
+                targets.append(node_index[(si + 1, r[t_col])])
+                values.append(r["customer_count"])
+
+        sankey = go.Figure(
+            data=[
+                go.Sankey(
+                    arrangement="snap",
+                    node=dict(
+                        pad=18,
+                        thickness=16,
+                        line=dict(color="rgba(30,30,30,0.5)", width=0.5),
+                        label=node_labels,
+                    ),
+                    link=dict(source=sources, target=targets, value=values),
+                )
+            ]
+        )
+        sankey.update_layout(title_text="Customer Journey Across Touchpoints", font_size=11)
+        st.plotly_chart(sankey, use_container_width=True)
 
     st.markdown("---")
 
-
+    # -------------------------------
+    # Correlation heatmap
+    # -------------------------------
     st.subheader("Metric Correlation Heatmap")
     fig = px.imshow(
         correlation,
@@ -1363,6 +1448,7 @@ def page_attribution_funnel(data):
         title="Correlation Between Marketing Metrics",
     )
     st.plotly_chart(fig, use_container_width=True)
+
 
 
 # =============================================================================
