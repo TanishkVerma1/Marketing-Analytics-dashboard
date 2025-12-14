@@ -1359,80 +1359,122 @@ def page_attribution_funnel(data):
     # -------------------------------
     # Improved Customer Journey Sankey (cleaner + stage-separated labels)
     # -------------------------------
-    st.subheader("Customer Journey Sankey (Touchpoints)")
+# -------------------------------
+# Customer Journey Sankey (Clean, budget-style)
+# -------------------------------
+st.subheader("Customer Journey Sankey (Touchpoints)")
+st.caption("Clear stage-wise flow (left ➜ right), colored nodes, cleaner links")
 
-    stages = ["touchpoint_1", "touchpoint_2", "touchpoint_3", "touchpoint_4"]
-    stages = [c for c in stages if c in journey.columns]
+stages = ["touchpoint_1", "touchpoint_2", "touchpoint_3", "touchpoint_4"]
+stages = [c for c in stages if c in journey.columns]
 
-    if len(stages) < 2:
-        st.warning("Journey dataset does not have enough touchpoint columns to build Sankey.")
-    else:
-        # Stage-separated labels to avoid messy merges
-        def stage_label(stage_idx, val):
-            return f"T{stage_idx+1}: {val}"
+if len(stages) < 2:
+    st.warning("Journey dataset does not have enough touchpoint columns to build Sankey.")
+else:
+    # ----- 1) Prepare stage-wise unique nodes -----
+    stage_values = []
+    for col in stages:
+        vals = journey[col].dropna().astype(str).unique().tolist()
+        stage_values.append(sorted(vals))
 
-        # Build node list per stage
-        node_labels = []
-        node_index = {}
-        for si, col in enumerate(stages):
-            vals = journey[col].dropna().astype(str).unique().tolist()
-            vals = sorted(vals)
-            for v in vals:
-                lab = stage_label(si, v)
-                node_index[(si, v)] = len(node_labels)
-                node_labels.append(lab)
+    # Create nodes with stage-separated labels so they don't merge visually
+    node_labels = []
+    node_stage = []
+    node_key_to_idx = {}
 
-        sources, targets, values = [], [], []
-        for si in range(len(stages) - 1):
-            s_col = stages[si]
-            t_col = stages[si + 1]
-            subset = journey.dropna(subset=[s_col, t_col]).copy()
-            subset[s_col] = subset[s_col].astype(str)
-            subset[t_col] = subset[t_col].astype(str)
+    for si, vals in enumerate(stage_values):
+        for v in vals:
+            label = f"{v}"   # keep label clean (budget-style)
+            node_key_to_idx[(si, v)] = len(node_labels)
+            node_labels.append(label)
+            node_stage.append(si)
 
-            grp = subset.groupby([s_col, t_col], as_index=False)["customer_count"].sum()
+    # ----- 2) Fixed x/y positions to align like budget diagram -----
+    # x positions = columns by stage
+    n_stages = len(stages)
+    node_x = []
+    node_y = []
 
-            # Reduce clutter: keep top links, bucket small flows
-            grp = grp.sort_values("customer_count", ascending=False)
-            top = grp.head(25)
-            rest = grp.iloc[25:]
-            if not rest.empty:
-                # bucket rest into "Other"
-                other_s = "Other"
-                other_t = "Other"
-                # create nodes if not exist
-                if (si, other_s) not in node_index:
-                    node_index[(si, other_s)] = len(node_labels)
-                    node_labels.append(stage_label(si, other_s))
-                if (si + 1, other_t) not in node_index:
-                    node_index[(si + 1, other_t)] = len(node_labels)
-                    node_labels.append(stage_label(si + 1, other_t))
+    for si, vals in enumerate(stage_values):
+        x = si / (n_stages - 1)  # 0.0 ... 1.0
+        m = max(1, len(vals))
+        for j in range(m):
+            y = (j + 1) / (m + 1)  # evenly spread 0..1
+            node_x.append(x)
+            node_y.append(y)
 
-                sources.append(node_index[(si, other_s)])
-                targets.append(node_index[(si + 1, other_t)])
-                values.append(rest["customer_count"].sum())
+    # ----- 3) Build links (source, target, value) -----
+    sources, targets, values = [], [], []
 
-            for _, r in top.iterrows():
-                sources.append(node_index[(si, r[s_col])])
-                targets.append(node_index[(si + 1, r[t_col])])
-                values.append(r["customer_count"])
+    for si in range(n_stages - 1):
+        s_col = stages[si]
+        t_col = stages[si + 1]
 
-        sankey = go.Figure(
-            data=[
-                go.Sankey(
-                    arrangement="snap",
-                    node=dict(
-                        pad=18,
-                        thickness=16,
-                        line=dict(color="rgba(30,30,30,0.5)", width=0.5),
-                        label=node_labels,
-                    ),
-                    link=dict(source=sources, target=targets, value=values),
-                )
-            ]
-        )
-        sankey.update_layout(title_text="Customer Journey Across Touchpoints", font_size=11)
-        st.plotly_chart(sankey, use_container_width=True)
+        subset = journey.dropna(subset=[s_col, t_col]).copy()
+        subset[s_col] = subset[s_col].astype(str)
+        subset[t_col] = subset[t_col].astype(str)
+
+        # aggregate
+        grp = subset.groupby([s_col, t_col], as_index=False)["customer_count"].sum()
+
+        # reduce clutter: keep top flows
+        grp = grp.sort_values("customer_count", ascending=False)
+        top = grp.head(30)  # increase/decrease if needed
+
+        for _, r in top.iterrows():
+            s_idx = node_key_to_idx[(si, r[s_col])]
+            t_idx = node_key_to_idx[(si + 1, r[t_col])]
+            sources.append(s_idx)
+            targets.append(t_idx)
+            values.append(float(r["customer_count"]))
+
+    # ----- 4) Nice node colors + link colors derived from source node -----
+    palette = [
+        "#2E86AB", "#F18F01", "#2AA876", "#C73E1D", "#6C5B7B",
+        "#1B998B", "#E84855", "#4A4E69", "#3A86FF", "#FF006E"
+    ]
+    node_colors = [palette[si % len(palette)] for si in node_stage]
+
+    def hex_to_rgba(hex_color, a=0.35):
+        h = hex_color.lstrip("#")
+        r = int(h[0:2], 16)
+        g = int(h[2:4], 16)
+        b = int(h[4:6], 16)
+        return f"rgba({r},{g},{b},{a})"
+
+    link_colors = [hex_to_rgba(node_colors[s], 0.35) for s in sources]
+
+    sankey = go.Figure(
+        data=[
+            go.Sankey(
+                arrangement="fixed",  # IMPORTANT: makes it look like budget-style columns
+                node=dict(
+                    pad=18,
+                    thickness=18,
+                    label=node_labels,
+                    color=node_colors,
+                    x=node_x,
+                    y=node_y,
+                    line=dict(color="rgba(0,0,0,0.35)", width=0.6),
+                ),
+                link=dict(
+                    source=sources,
+                    target=targets,
+                    value=values,
+                    color=link_colors,
+                ),
+            )
+        ]
+    )
+
+    sankey.update_layout(
+        title="Customer Journey Across Touchpoints (Stage-wise Sankey)",
+        font_size=12,
+        margin=dict(l=10, r=10, t=50, b=10),
+    )
+
+    st.plotly_chart(sankey, use_container_width=True)
+
 
     st.markdown("---")
 
