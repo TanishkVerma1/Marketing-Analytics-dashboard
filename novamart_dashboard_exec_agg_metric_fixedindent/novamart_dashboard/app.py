@@ -22,6 +22,8 @@ from sklearn.metrics import (
     confusion_matrix,
     roc_curve,
     roc_auc_score,
+    precision_recall_curve,
+    average_precision_score,
 )
 
 # =============================================================================
