@@ -1497,115 +1497,230 @@ def page_attribution_funnel(data):
 # PAGE: ML MODEL EVALUATION
 # =============================================================================
 def page_ml_evaluation(data):
-    st.title("🤖 ML Model Evaluation - Lead Scoring")
-    st.markdown("Evaluate the binary classifier used for lead conversion prediction.")
+    st.title("🤖 ML Model Evaluation – Lead Scoring")
+    st.markdown("Comprehensive evaluation of the lead conversion classification model.")
 
     leads = data["leads"]
     lc = data["learning_curve"]
     fi = data["feature_importance"]
 
-    col1, col2 = st.columns(2)
+    # =========================
+    # MODEL OVERVIEW (CARDS)
+    # =========================
+    y_true = leads["actual_converted"].values
+    y_score = leads["predicted_probability"].values
+    y_pred_default = (y_score >= 0.5).astype(int)
 
-    with col1:
-        st.subheader("Confusion Matrix")
-        threshold = st.slider(
-            "Classification Threshold",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.5,
-            step=0.01,
-        )
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred_default).ravel()
 
-        y_true = leads["actual_converted"].values
-        y_score = leads["predicted_probability"].values
-        y_pred = (y_score >= threshold).astype(int)
+    accuracy = (tp + tn) / (tp + tn + fp + fn)
+    precision = tp / max(tp + fp, 1)
+    recall = tp / max(tp + fn, 1)
+    f1 = 2 * precision * recall / max(precision + recall, 1e-9)
 
-        cm = confusion_matrix(y_true, y_pred)
-        cm_df = pd.DataFrame(
-            cm,
-            index=["Actual 0", "Actual 1"],
-            columns=["Pred 0", "Pred 1"],
-        )
+    st.subheader("Model Overview")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Total Leads", f"{len(leads)/1000:.1f}K")
+    c2.metric("Accuracy", f"{accuracy*100:.1f}%")
+    c3.metric("Precision", f"{precision*100:.1f}%")
+    c4.metric("Recall", f"{recall*100:.1f}%")
+    c5.metric("F1 Score", f"{f1:.2f}")
 
-        fig = px.imshow(
-            cm_df,
-            text_auto=True,
-            color_continuous_scale="Blues",
-            title=f"Confusion Matrix (threshold = {threshold:.2f})",
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(cm_df.style.format("{:.0f}"))
+    st.divider()
 
-    with col2:
-        st.subheader("ROC Curve")
-        fpr, tpr, _ = roc_curve(y_true, y_score)
-        auc_score = roc_auc_score(y_true, y_score)
+    # =========================
+    # CONFUSION MATRIX
+    # =========================
+    st.subheader("Section 7: Confusion Matrix")
 
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=fpr, y=tpr, mode="lines", name="ROC"))
-        fig.add_trace(
-            go.Scatter(x=[0, 1], y=[0, 1], mode="lines", name="Random", line=dict(dash="dash"))
-        )
-        fig.update_layout(
-            title=f"ROC Curve (AUC = {auc_score:.3f})",
-            xaxis_title="False Positive Rate",
-            yaxis_title="True Positive Rate",
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    left, right = st.columns([2.2, 1])
 
-    st.markdown("---")
-    st.subheader("Learning Curve")
+    with right:
+        threshold = st.slider("Classification Threshold", 0.0, 1.0, 0.50, 0.01)
+        display_mode = st.radio("Display Mode", ["Counts", "Percentages"])
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=lc["training_size"],
-            y=lc["train_score"],
-            mode="lines+markers",
-            name="Training Score",
-        )
+    y_pred = (y_score >= threshold).astype(int)
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+
+    cm = np.array([[tn, fp], [fn, tp]], dtype=float)
+    cm_display = cm / cm.sum() * 100 if display_mode == "Percentages" else cm
+
+    fig_cm = px.imshow(
+        cm_display,
+        text_auto=".1f" if display_mode == "Percentages" else True,
+        color_continuous_scale="Blues",
+        labels=dict(x="Predicted", y="Actual"),
+        x=["No Convert", "Convert"],
+        y=["Convert", "No Convert"],
+        title=f"Confusion Matrix (Threshold = {threshold:.2f})"
     )
-    fig.add_trace(
-        go.Scatter(
-            x=lc["training_size"],
-            y=lc["validation_score"],
-            mode="lines+markers",
-            name="Validation Score",
-        )
+    fig_cm.update_layout(height=420)
+    left.plotly_chart(fig_cm, use_container_width=True)
+
+    st.markdown("### Interpretation")
+    a, b, c, d = st.columns(4)
+    a.success(f"**True Negatives:** {tn}\n\nCorrectly identified non-converters")
+    b.warning(f"**False Positives:** {fp}\n\nExtra leads contacted")
+    c.error(f"**False Negatives:** {fn}\n\nMissed conversions")
+    d.info(f"**True Positives:** {tp}\n\nCorrectly identified converters")
+
+    st.caption(
+        "Insight: False positives are acceptable for sales outreach; false negatives are costly and should be minimized."
     )
 
-    fig.update_layout(
+    st.divider()
+
+    # =========================
+    # ROC CURVE
+    # =========================
+    st.subheader("Section 7: ROC Curve")
+
+    fpr, tpr, thresholds = roc_curve(y_true, y_score)
+    auc_score = roc_auc_score(y_true, y_score)
+
+    j_stat = tpr - fpr
+    idx = np.argmax(j_stat)
+    best_thr = thresholds[idx]
+
+    left, right = st.columns([2.2, 1])
+
+    fig_roc = go.Figure()
+    fig_roc.add_trace(go.Scatter(x=fpr, y=tpr, name=f"ROC Curve (AUC = {auc_score:.3f})"))
+    fig_roc.add_trace(go.Scatter(x=[0, 1], y=[0, 1], name="Random Classifier", line=dict(dash="dash")))
+    fig_roc.add_trace(go.Scatter(
+        x=[fpr[idx]], y=[tpr[idx]],
+        mode="markers",
+        marker=dict(size=12, symbol="star"),
+        name=f"Optimal (thresh={best_thr:.2f})"
+    ))
+
+    fig_roc.update_layout(
+        xaxis_title="False Positive Rate",
+        yaxis_title="True Positive Rate",
+        height=420
+    )
+    left.plotly_chart(fig_roc, use_container_width=True)
+
+    right.metric("AUC Score", f"{auc_score:.3f}")
+    right.metric("Optimal Threshold", f"{best_thr:.2f}")
+    right.metric("TPR at Optimal", f"{tpr[idx]*100:.2f}%")
+    right.metric("FPR at Optimal", f"{fpr[idx]*100:.2f}%")
+
+    st.divider()
+
+    # =========================
+    # PRECISION-RECALL CURVE
+    # =========================
+    st.subheader("Bonus: Precision-Recall Curve")
+
+    precision_curve, recall_curve, _ = precision_recall_curve(y_true, y_score)
+    ap = average_precision_score(y_true, y_score)
+    baseline = y_true.mean()
+
+    fig_pr = go.Figure()
+    fig_pr.add_trace(go.Scatter(x=recall_curve, y=precision_curve, name=f"PR Curve (AP={ap:.3f})"))
+    fig_pr.add_trace(go.Scatter(
+        x=[0, 1], y=[baseline, baseline],
+        name=f"Baseline ({baseline*100:.1f}%)",
+        line=dict(dash="dash")
+    ))
+
+    fig_pr.update_layout(
+        xaxis_title="Recall",
+        yaxis_title="Precision",
+        height=420
+    )
+    st.plotly_chart(fig_pr, use_container_width=True)
+
+    st.metric("Average Precision", f"{ap:.3f}")
+    st.metric("Conversion Rate", f"{baseline*100:.1f}%")
+
+    st.divider()
+
+    # =========================
+    # LEARNING CURVE
+    # =========================
+    st.subheader("Section 7: Learning Curve")
+
+    fig_lc = go.Figure()
+    fig_lc.add_trace(go.Scatter(
+        x=lc["training_size"], y=lc["train_score"],
+        mode="lines+markers", name="Training Score"
+    ))
+    fig_lc.add_trace(go.Scatter(
+        x=lc["training_size"], y=lc["validation_score"],
+        mode="lines+markers", name="Validation Score"
+    ))
+
+    fig_lc.update_layout(
         xaxis_title="Training Set Size",
         yaxis_title="Score",
-        title="Learning Curve (Training vs Validation Score)",
+        height=420
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig_lc, use_container_width=True)
 
-    st.markdown("### Feature Importance")
-    fi_sorted = fi.sort_values("importance", ascending=True)
-    fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=fi_sorted["importance"],
-            y=fi_sorted["feature"],
-            orientation="h",
-            name="Importance",
-        )
+    st.caption(
+        "Insight: Converging curves indicate no severe overfitting; additional data may yield marginal improvements."
     )
-    fig.add_trace(
-        go.Scatter(
-            x=fi_sorted["importance"] + fi_sorted["importance_std"],
-            y=fi_sorted["feature"],
-            mode="markers",
-            name="Std Dev",
-        )
-    )
-    fig.update_layout(
-        title="Feature Importance with Uncertainty",
-        xaxis_title="Importance",
+
+    st.divider()
+
+    # =========================
+    # FEATURE IMPORTANCE
+    # =========================
+    st.subheader("Section 7: Feature Importance")
+
+    fi_sorted = fi.sort_values("importance", ascending=False)
+
+    fig_fi = go.Figure()
+    fig_fi.add_trace(go.Bar(
+        x=fi_sorted["importance"],
+        y=fi_sorted["feature"],
+        orientation="h",
+        error_x=dict(array=fi_sorted["importance_std"], visible=True),
+        name="Importance"
+    ))
+
+    fig_fi.update_layout(
+        xaxis_title="Importance Score",
         yaxis_title="Feature",
+        height=480
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig_fi, use_container_width=True)
+
+    st.markdown("### Feature Details")
+    st.dataframe(fi_sorted, use_container_width=True)
+
+    st.divider()
+
+    # =========================
+    # MODEL RECOMMENDATIONS
+    # =========================
+    st.subheader("Model Recommendations")
+
+    r1, r2, r3 = st.columns(3)
+
+    r1.success(
+        "**Strengths**\n\n"
+        "- Good discrimination (AUC > 0.75)\n"
+        "- No severe overfitting\n"
+        "- Balanced precision/recall"
+    )
+
+    r2.warning(
+        "**Areas to Monitor**\n\n"
+        "- False negatives (missed conversions)\n"
+        "- Threshold tuning\n"
+        "- Feature drift over time"
+    )
+
+    r3.info(
+        "**Business Actions**\n\n"
+        "- Increase webinar investment\n"
+        "- Prioritize form completion\n"
+        "- Use multi-touch attribution"
+    )
+
 
 
 # =============================================================================
